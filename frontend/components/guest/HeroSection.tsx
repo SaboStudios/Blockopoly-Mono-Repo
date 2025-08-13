@@ -15,27 +15,23 @@ import { useMovementActions } from '@/hooks/useMovementActions';
 import { usePropertyActions } from '@/hooks/usePropertyActions';
 import { useTradeActions } from '@/hooks/useTradeActions';
 import { shortString, BigNumberish } from 'starknet';
+import GameRoomLoading from '@/components/game/game-room-loading';
 
-// TypeScript interface for the response from player.register
+// TypeScript interfaces (unchanged)
 interface RegisterResponse {
   transaction_hash: string;
-  // Add other fields if returned by player.register
 }
 
-// TypeScript interface for the response from game.createGame
 interface CreateGameResponse {
   transaction_hash: string;
-  // Add other fields if returned by game.createGame
 }
 
-// Token interface
 interface Token {
   name: string;
   emoji: string;
   value: number;
 }
 
-// Game interface
 interface Game {
   id: number;
   creator: `0x${string}` | undefined;
@@ -65,7 +61,6 @@ interface Game {
   player_wheelbarrow: bigint;
 }
 
-// Token definitions
 const tokens: Token[] = [
   { name: 'Hat', emoji: '🎩', value: 0 },
   { name: 'Car', emoji: '🚗', value: 1 },
@@ -108,10 +103,10 @@ const HeroSection = () => {
   const [username, setUsername] = useState('');
   const [registrationPending, setRegistrationPending] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
-  const [gameToken, setGameToken] = useState(''); // State for private game token
-  const [numPrivatePlayers, setNumPrivatePlayers] = useState(''); // State for number of players in private game
-  const [showModal, setShowModal] = useState(false); // State for create game modal
-  const [showPrivateGameModal, setShowPrivateGameModal] = useState(false); // State for private game modal
+  const [gameToken, setGameToken] = useState('');
+  const [numPrivatePlayers, setNumPrivatePlayers] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [showPrivateGameModal, setShowPrivateGameModal] = useState(false);
   const [gameType, setGameType] = useState('');
   const [selectedToken, setSelectedToken] = useState('');
   const [numberOfPlayers, setNumberOfPlayers] = useState('');
@@ -133,23 +128,25 @@ const HeroSection = () => {
   };
 
   const handleRouteToJoinRoom = () => {
+    console.log('[handleRouteToJoinRoom] Navigating to /join-room');
     router.push('/join-room');
   };
 
-  // Check registration status and fetch username
   const checkRegistration = async () => {
     try {
+      console.log('[checkRegistration] Checking registration for address:', address);
       const registered = await player.isRegistered(address!);
       setIsRegistered(registered);
       if (registered) {
         const user = await player.getUsernameFromAddress(address!);
         const decodedUsername = shortString.decodeShortString(user);
         setUsername(decodedUsername || 'Unknown');
+        console.log('[checkRegistration] Username:', decodedUsername);
       } else {
         setUsername('');
       }
     } catch (err: any) {
-      console.error('Error checking registration:', err);
+      console.error('[checkRegistration] Error:', err);
       setError(err?.message || 'Failed to check registration status');
     }
   };
@@ -160,8 +157,9 @@ const HeroSection = () => {
     setResponse(null);
     setRegistrationPending(true);
     try {
+      console.log(`[handleRequest] Executing ${label}`);
       const res = await fn();
-      console.log(label, res);
+      console.log(`[handleRequest] ${label} response:`, res);
       setResponse(res);
 
       await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -174,7 +172,7 @@ const HeroSection = () => {
       setSuccess('Registration successful!');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      console.error(label, err);
+      console.error(`[handleRequest] ${label} error:`, err);
       setError(err?.message || 'Failed to register. Please try again.');
       setRegistrationPending(false);
     } finally {
@@ -182,14 +180,13 @@ const HeroSection = () => {
     }
   };
 
-  // Wait for last game update
   const waitForLastGameUpdate = async (
     expectedGameId: number,
-    maxWait: number = 90000
+    maxWait: number = 60000 // Reduced to 60s for faster feedback
   ) => {
     const startTime = Date.now();
     const delay = 2000;
-    const maxAttempts = 45; // 90s / 2s per attempt
+    const maxAttempts = 30; // 60s / 2s per attempt
     let attempts = 0;
 
     while (attempts < maxAttempts && Date.now() - startTime < maxWait) {
@@ -211,7 +208,29 @@ const HeroSection = () => {
     return null; // Trigger fallback
   };
 
-  // Handle create game
+  const waitForGameStatus = async (gid: number, maxAttempts: number = 5, delay: number = 2000) => {
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      try {
+        const gameData = await game.getGame(gid) as Game;
+        console.log(`[waitForGameStatus] Game ${gid} data:`, gameData);
+        if (!gameData) {
+          throw new Error('Game data not found.');
+        }
+        if (gameData.is_initialised) {
+          console.log(`[waitForGameStatus] Game ${gid} is initialized, status:`, gameData.status);
+          return gameData;
+        }
+        console.log(`[waitForGameStatus] Game ${gid} not yet initialized, attempt ${attempts + 1}`);
+      } catch (err: any) {
+        console.warn(`[waitForGameStatus] Error checking game status, attempt ${attempts + 1}:`, err.message);
+      }
+      attempts++;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    throw new Error('Game data not available or not initialized after multiple attempts.');
+  };
+
   const handleCreateGame = async () => {
     if (!account || !address) {
       setError('Please connect your wallet');
@@ -254,6 +273,7 @@ const HeroSection = () => {
     setSuccess(null);
 
     try {
+      console.log('[handleCreateGame] Starting game creation');
       const initialLastGame = Number(await game.lastGame()) || 0;
       console.log(`[handleCreateGame] Initial lastGame: ${initialLastGame}`);
 
@@ -265,9 +285,6 @@ const HeroSection = () => {
         throw new Error('No transaction hash returned from createGame');
       }
 
-      console.log('[handleCreateGame] Waiting 30 seconds for contract to update...');
-      await new Promise((resolve) => setTimeout(resolve, 30000));
-
       const newGameId = initialLastGame + 1;
       console.log(`[handleCreateGame] Assumed new game ID: ${newGameId}`);
 
@@ -278,70 +295,70 @@ const HeroSection = () => {
         throw new Error('Game creation not confirmed by lastGame update');
       }
 
-      const gameData = await game.getGame(newGameId) as Game;
-      if (!gameData || !gameData.is_initialised) {
-        throw new Error('Game data not found or not initialized');
-      }
+      const gameData = await waitForGameStatus(newGameId);
       console.log('[handleCreateGame] Game data confirmed:', gameData);
 
       const updatedGames = [...new Set([...JSON.parse(localStorage.getItem('ongoingGames') || '[]'), newGameId])];
       localStorage.setItem('ongoingGames', JSON.stringify(updatedGames));
       setShowModal(false);
-      console.log(`[handleCreateGame] Redirecting to /game-waiting?gameId=${newGameId}&creator=${address}`);
-      router.push(`/game-waiting?gameId=${newGameId}&creator=${address}`);
+      console.log(`[handleCreateGame] Initiating redirect to /game-waiting?gameId=${newGameId}&creator=${address}`);
+      setTimeout(() => {
+        router.push(`/game-waiting?gameId=${newGameId}&creator=${address}`);
+        console.log('[handleCreateGame] Redirect executed');
+      }, 2000); // 2-second delay for loading screen
     } catch (err: any) {
       console.error('[handleCreateGame] Error:', err.message);
       setError(err?.message || 'Failed to create game. Please try again.');
     } finally {
       setIsCreatingGame(false);
+      console.log('[handleCreateGame] Loading state cleared');
     }
   };
 
-  // Handle private game creation
   const handleCreatePrivateGame = async () => {
     if (!account || !gameToken || !numPrivatePlayers) {
       setError('Please connect your wallet, select a token, and select number of players.');
+      console.log('[handleCreatePrivateGame] Missing fields:', { gameToken, numPrivatePlayers });
       return;
     }
     const numPlayers = Number(numPrivatePlayers);
     if (isNaN(numPlayers) || numPlayers < 2 || numPlayers > 8) {
       setError('Number of players must be between 2 and 8');
+      console.log('[handleCreatePrivateGame] Invalid number of players:', numPlayers);
       return;
     }
     const tokenValue = tokens.find((t) => t.name === gameToken)?.value;
     if (tokenValue === undefined) {
       setError('Invalid token selected');
+      console.log('[handleCreatePrivateGame] Invalid token:', gameToken);
       return;
     }
-    setLoading(true);
+    setIsCreatingGame(true);
     setError(null);
+    setSuccess(null);
     try {
+      console.log('[handleCreatePrivateGame] Starting private game creation');
       const initialLastGame = Number(await game.lastGame()) || 0;
+      console.log(`[handleCreatePrivateGame] Initial lastGame: ${initialLastGame}`);
       const tx = await game.createGame(account, 1, tokenValue, numPlayers);
-      console.log('createPrivateGame', tx);
+      console.log('[handleCreatePrivateGame] Create game transaction:', tx);
 
       if (!tx?.transaction_hash) {
         throw new Error('No transaction hash returned from createGame');
       }
 
-      console.log('[createPrivateGame] Waiting 30 seconds for contract to update...');
-      await new Promise((resolve) => setTimeout(resolve, 30000));
-
       const newGameId = initialLastGame + 1;
-      console.log(`[createPrivateGame] Assumed new game ID: ${newGameId}`);
+      console.log(`[handleCreatePrivateGame] Assumed new game ID: ${newGameId}`);
 
       const currentLastGame = await waitForLastGameUpdate(newGameId);
-      console.log(`[createPrivateGame] Current lastGame: ${currentLastGame}`);
+      console.log(`[handleCreatePrivateGame] Current lastGame: ${currentLastGame}`);
 
       if (currentLastGame === null) {
         throw new Error('Game creation not confirmed by lastGame update');
       }
 
-      const gameData = await game.getGame(newGameId) as Game;
-      if (!gameData || !gameData.is_initialised) {
-        throw new Error('Game data not found or not initialized');
-      }
-      console.log('[createPrivateGame] Game data confirmed:', gameData);
+      const gameData = await waitForGameStatus(newGameId);
+      console.log('[handleCreatePrivateGame] Game data confirmed:', gameData);
 
       const updatedGames = [...new Set([...JSON.parse(localStorage.getItem('ongoingGames') || '[]'), newGameId])];
       localStorage.setItem('ongoingGames', JSON.stringify(updatedGames));
@@ -349,17 +366,22 @@ const HeroSection = () => {
       setGameToken('');
       setNumPrivatePlayers('');
       setShowPrivateGameModal(false);
-      setTimeout(() => setSuccess(null), 3000);
-      router.push(`/game-waiting?gameId=${newGameId}&creator=${address}`);
+      console.log(`[handleCreatePrivateGame] Initiating redirect to /game-waiting?gameId=${newGameId}&creator=${address}`);
+      setTimeout(() => {
+        router.push(`/game-waiting?gameId=${newGameId}&creator=${address}`);
+        console.log('[handleCreatePrivateGame] Redirect executed');
+      }, 2000); // 2-second delay for loading screen
     } catch (err: any) {
-      console.error('createPrivateGame', err);
+      console.error('[handleCreatePrivateGame] Error:', err.message);
       setError(err?.message || 'Failed to create private game. Please try again.');
     } finally {
-      setLoading(false);
+      setIsCreatingGame(false);
+      console.log('[handleCreatePrivateGame] Loading state cleared');
     }
   };
 
   useEffect(() => {
+    console.log('[useEffect] Address changed:', address);
     if (isWasmSupported()) {
       getWasmCapabilities();
     }
@@ -367,6 +389,15 @@ const HeroSection = () => {
       checkRegistration();
     }
   }, [address, player]);
+
+  useEffect(() => {
+    console.log('[useEffect] isCreatingGame:', isCreatingGame);
+  }, [isCreatingGame]);
+
+  if (isCreatingGame) {
+    console.log('[Render] Showing GameRoomLoading');
+    return <GameRoomLoading action="create" />;
+  }
 
   return (
     <section className="w-full lg:h-screen md:h-[calc(100vh-87px)] h-screen relative overflow-x-hidden md:mb-20 mb-10">
